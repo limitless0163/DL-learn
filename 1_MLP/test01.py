@@ -26,5 +26,6 @@ def net(X):
 
 loss = nn.CrossEntropyLoss(reduction='none')
 
-def train_ch3(net, train_iter, test_iter, loss, num_epochs, updater):   #@save
-    animator = Animator(xlabel=)
+num_epochs, lr = 10, 0.1
+updater = torch.optim.SGD(params, lr=lr)
+d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, updater)
