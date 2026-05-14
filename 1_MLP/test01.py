@@ -29,3 +29,7 @@ loss = nn.CrossEntropyLoss(reduction='none')
 num_epochs, lr = 10, 0.1
 updater = torch.optim.SGD(params, lr=lr)
 d2l.train_ch3(net, train_iter, test_iter, loss, num_epochs, updater)
+d2l.plt.show()
+
+d2l.predict_ch3(net, test_iter)
+d2l.plt.show()
