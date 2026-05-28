@@ -5,7 +5,6 @@ from d2l import torch as d2l
 
 
 all_images = torchvision.datasets.CIFAR10(train=True, root="../data", download=True)
-d2l.show_images([all_images[i][0] for i in range(32)], 4, 8, scale=0.8)
 
 train_augs = torchvision.transforms.Compose([torchvision.transforms.RandomHorizontalFlip(), torchvision.transforms.ToTensor()])
 
