@@ -7,6 +7,7 @@ import torch
 import torchvision
 from torch import nn
 from d2l import torch as d2l
+from tqdm import tqdm
 
 
 data_dir = '../data/cifar-10/'
@@ -35,7 +36,8 @@ def reorg_train_valid(data_dir, labels, valid_ratio):
     # 验证集中每个类别的样本数
     n_valid_per_label = max(1, math.floor(n * valid_ratio))
     label_count = {}
-    for train_file in os.listdir(os.path.join(data_dir, 'train')):
+    train_files = os.listdir(os.path.join(data_dir, 'train'))
+    for train_file in tqdm(train_files, desc='整理训练/验证集', unit='file'):
         label = labels[train_file.split('.')[0]]
         fname = os.path.join(data_dir, 'train', train_file)
         copyfile(fname, os.path.join(data_dir, 'train_valid_test', 'train_valid', label))
@@ -48,7 +50,8 @@ def reorg_train_valid(data_dir, labels, valid_ratio):
 
 def reorg_test(data_dir):
     """在预测期间整理测试集，以方便读取"""
-    for test_file in os.listdir(os.path.join(data_dir, 'test')):
+    test_files = os.listdir(os.path.join(data_dir, 'test'))
+    for test_file in tqdm(test_files, desc='整理测试集', unit='file'):
         copyfile(os.path.join(data_dir, 'test', test_file), os.path.join(data_dir, 'train_valid_test', 'test', 'unknown'))
 
 def reorg_cifar10_data(data_dir, valid_ratio):
@@ -99,40 +102,52 @@ def train(net, train_iter, valid_iter, num_epochs, lr, wd, devices, lr_period, l
         legend.append('valid acc')
     animator = d2l.Animator(xlabel='epoch', xlim=[1, num_epochs], legend=legend)
     net = nn.DataParallel(net, device_ids=devices).to(devices[0])
-    for epoch in range(num_epochs):
+    pbar_epoch = tqdm(range(num_epochs), desc='Training', unit='epoch')
+    for epoch in pbar_epoch:
         net.train()
         metric = d2l.Accumulator(3)
-        for i, (features, labels) in enumerate(train_iter):
+        pbar_batch = tqdm(enumerate(train_iter), total=num_batches, desc=f'Epoch {epoch+1}/{num_epochs}', unit='batch', leave=False)
+        for i, (features, labels) in pbar_batch:
             timer.start()
             l, acc = d2l.train_batch_ch13(net, features, labels, loss, trainer, devices)
             metric.add(l, acc, labels.shape[0])
             timer.stop()
+            train_loss = metric[0] / metric[2]
+            train_acc = metric[1] / metric[2]
+            pbar_batch.set_postfix({'loss': f'{train_loss:.3f}', 'acc': f'{train_acc:.3f}'})
             if (i + 1) % (num_batches // 5) == 0 or i == num_batches - 1:
-                animator.add(epoch + (i + 1) / num_batches, (metric[0] / metric[2], metric[1] / metric[2], None))
+                animator.add(epoch + (i + 1) / num_batches, (train_loss, train_acc, None))
         if valid_iter is not None:
             valid_acc = d2l.evaluate_accuracy_gpu(net, valid_iter)
             animator.add(epoch + 1, (None, None, valid_acc))
+        pbar_epoch.set_postfix({'train_loss': f'{metric[0] / metric[2]:.3f}', 'train_acc': f'{metric[1] / metric[2]:.3f}', 'valid_acc': f'{valid_acc:.3f}' if valid_iter is not None else 'N/A'})
         scheduler.step()
     measures = (f'train loss {metric[0] / metric[2]:.3f}, train acc {metric[1] / metric[2]:.3f}')
     if valid_iter is not None:
         measures += f', valid acc {valid_acc:.3f}'
     print(measures + f'\n{metric[2] * num_epochs / timer.sum():.1f} examples/sec on {str(devices)}')
 
-devices, num_epochs, lr, wd = d2l.try_all_gpus(), 100, 0.1, 5e-4
-lr_period, lr_decay, net = 50, 0.1, get_net()
+devices, num_epochs, lr, wd = d2l.try_all_gpus(), 20, 2e-4, 5e-4
+lr_period, lr_decay, net = 4, 0.9, get_net()
 train(net, train_iter, valid_iter, num_epochs, lr, wd, devices, lr_period, lr_decay)
 d2l.plt.show()
 
 net, preds = get_net(), []
 train(net, train_valid_iter, None, num_epochs, lr, wd, devices, lr_period, lr_decay)
-for X, _ in test_iter:
-    y_hat = net(X.to(devices[0]))
-    preds.extend(y_hat.argmax(dim=1).type(torch.int32).cpu().numpy())
-sorted_ids = list(range(1, len(test_ds) + 1))
-sorted_ids.sort(key=lambda x: str(x))
+net.eval()
+with torch.no_grad():
+    for X, _ in tqdm(test_iter, desc='测试集推理', unit='batch'):
+        y_hat = net(X.to(devices[0]))
+        preds.extend(y_hat.argmax(dim=1).type(torch.int32).cpu().numpy())
+
+sorted_ids = list(range(1, len(test_ds) + 1))  # 1, 2, 3, ... 已是数字序，无需排序
 df = pd.DataFrame({'id': sorted_ids, 'label': preds})
 df['label'] = df['label'].apply(lambda x: train_valid_ds.classes[x])
-df.to_csv('submission.csv', index=False)
+
+output_path = 'submission.csv'
+print('正在写入 submission.csv ...')
+df.to_csv(output_path, index=False)
+print(f'已保存到 {output_path}')
 d2l.plt.show()
 
 
